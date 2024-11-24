@@ -21,15 +21,14 @@ enum AppState {
 
 impl From<proto::TunnelState> for AppState {
     fn from(value: proto::TunnelState) -> Self {
-        use proto::tunnel_state;
         use crate::proto::tunnel_state::State;
         match value.state {
             None => AppState::Inactive,
             Some(state) => match state {
-                State::Connecting(tunnel_state::Connecting { relay_info }) => {
+                State::Connecting(proto::tunnel_state::Connecting { relay_info }) => {
                     AppState::Connecting(relay_info.unwrap_or_default())
                 }
-                State::Connected(tunnel_state::Connected { relay_info }) => {
+                State::Connected(proto::tunnel_state::Connected { relay_info }) => {
                     AppState::Connected(relay_info.unwrap_or_default())
                 }
                 State::Disconnecting(_) => AppState::Disconnecting,
@@ -43,8 +42,55 @@ impl From<proto::TunnelState> for AppState {
 #[derive(Debug)]
 struct MulltrayApp {
     client: ManagementServiceClient<Channel>,
+    locations: proto::RelayList,
     app_state: AppState,
     tokio_handle: tokio::runtime::Handle,
+}
+
+impl MulltrayApp {
+    fn connect(&self) {
+        let mut client = self.client.clone();
+        self.tokio_handle.spawn(async move {
+            let _ = client.connect_tunnel(()).await;
+        });
+    }
+
+    fn disconnect(&self) {
+        let mut client = self.client.clone();
+        self.tokio_handle.spawn(async move {
+            let _ = client.disconnect_tunnel(()).await;
+        });
+    }
+
+    fn set_location(&self, country: String, city: Option<String>, hostname: Option<String>) {
+        let mut client = self.client.clone();
+        let loc_constraint = proto::LocationConstraint {
+            r#type: Some(proto::location_constraint::Type::Location(
+                proto::GeographicLocationConstraint { country, city, hostname },
+            )),
+        };
+        self.tokio_handle.spawn(async move {
+            match client.get_settings(()).await {
+                Ok(settings) => {
+                    let mut relay_settings = settings
+                        .into_inner()
+                        .relay_settings
+                        .expect("there should be relay settings");
+                    if let Some(proto::relay_settings::Endpoint::Normal(mut norm)) =
+                        relay_settings.endpoint
+                    {
+                        norm.location = Some(loc_constraint);
+                        relay_settings.endpoint =
+                            Some(proto::relay_settings::Endpoint::Normal(norm));
+                    }
+                    if let Err(e) = client.set_relay_settings(relay_settings).await {
+                        eprintln!("Could not set relay location: {}", e.message());
+                    }
+                }
+                Err(e) => eprintln!("Could not get relay settings: {}", e.message()),
+            };
+        });
+    }
 }
 
 impl ksni::Tray for MulltrayApp {
@@ -109,32 +155,64 @@ impl ksni::Tray for MulltrayApp {
             }
             AppState::Disconnecting | AppState::Error(_) | AppState::Inactive => {}
         }
-        vec![
-            StandardItem {
-                label: "Disconnect".into(),
-                enabled: can_disconnect,
-                activate: Box::new(|this: &mut Self| {
-                    let mut client = this.client.clone();
-                    this.tokio_handle.spawn(async move {
-                        let _ = client.disconnect_tunnel(()).await;
-                    });
-                }),
-                ..Default::default()
+        let disconnect_item = StandardItem {
+            label: "Disconnect".into(),
+            visible: can_disconnect,
+            activate: Box::new(|this: &mut Self| this.disconnect()),
+            ..Default::default()
+        }
+        .into();
+        let connect_item = StandardItem {
+            label: "Connect".into(),
+            visible: can_connect,
+            activate: Box::new(|this: &mut Self| this.connect()),
+            ..Default::default()
+        }
+        .into();
+
+        let mut locations_menu = vec![];
+        for country in &self.locations.countries {
+            let mut submenu: Vec<MenuItem<Self>> = vec![];
+            for city in &country.cities {
+                for relay in &city.relays {
+                    if relay.endpoint_type == proto::relay::RelayType::Wireguard.into() {
+                        let country_code = country.code.clone();
+                        let city_code = city.code.clone();
+                        let hostname = relay.hostname.clone();
+                        submenu.push(
+                            StandardItem {
+                                label: relay.hostname.to_string(),
+                                enabled: true,
+                                activate: Box::new(move |this: &mut Self| {
+                                    this.set_location(
+                                        country_code.clone(),
+                                        city_code.clone().into(),
+                                        hostname.clone().into(),
+                                    );
+                                }),
+                                ..Default::default()
+                            }
+                            .into(),
+                        )
+                    }
+                }
             }
-            .into(),
-            StandardItem {
-                label: "Connect".into(),
-                enabled: can_connect,
-                activate: Box::new(|this: &mut Self| {
-                    let mut client = this.client.clone();
-                    this.tokio_handle.spawn(async move {
-                        let _ = client.connect_tunnel(()).await;
-                    });
-                }),
-                ..Default::default()
-            }
-            .into(),
-        ]
+            locations_menu.push(
+                SubMenu {
+                    label: country.name.clone(),
+                    submenu,
+                    ..Default::default()
+                }
+                .into(),
+            );
+        }
+        let locations_item = SubMenu {
+            label: "Choose location".into(),
+            submenu: locations_menu,
+            ..Default::default()
+        }
+        .into();
+        vec![locations_item, connect_item, disconnect_item]
     }
 }
 
@@ -153,11 +231,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app_state = client.get_tunnel_state(()).await?.into_inner().into();
     let streaming_response = client.events_listen(()).await?;
     let mut stream = streaming_response.into_inner();
-    // TODO: selector for locations
-    // let locations = client.get_relay_locations(()).await?;
+    let locations = client.get_relay_locations(()).await?.into_inner();
 
     let app = MulltrayApp {
         client,
+        locations,
         app_state,
         tokio_handle,
     };
