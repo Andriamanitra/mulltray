@@ -39,6 +39,14 @@ impl From<proto::TunnelState> for AppState {
     }
 }
 
+impl From<proto::GeographicLocationConstraint> for proto::LocationConstraint {
+    fn from(geo_loc_constraint: proto::GeographicLocationConstraint) -> Self {
+        Self {
+            r#type: Some(proto::location_constraint::Type::Location(geo_loc_constraint)),
+        }
+    }
+}
+
 #[derive(Debug)]
 struct MulltrayApp {
     client: ManagementServiceClient<Channel>,
@@ -64,25 +72,16 @@ impl MulltrayApp {
 
     fn set_location(&self, country: String, city: Option<String>, hostname: Option<String>) {
         let mut client = self.client.clone();
-        let loc_constraint = proto::LocationConstraint {
-            r#type: Some(proto::location_constraint::Type::Location(
-                proto::GeographicLocationConstraint { country, city, hostname },
-            )),
-        };
         self.tokio_handle.spawn(async move {
             match client.get_settings(()).await {
                 Ok(settings) => {
-                    let mut relay_settings = settings
-                        .into_inner()
-                        .relay_settings
-                        .expect("there should be relay settings");
-                    if let Some(proto::relay_settings::Endpoint::Normal(mut norm)) =
-                        relay_settings.endpoint
-                    {
-                        norm.location = Some(loc_constraint);
-                        relay_settings.endpoint =
-                            Some(proto::relay_settings::Endpoint::Normal(norm));
-                    }
+                    let mut relay_settings = settings.into_inner().relay_settings.expect("there should be relay settings");
+                    let Some(proto::relay_settings::Endpoint::Normal(mut norm)) = relay_settings.endpoint else {
+                        eprintln!("Unsupported relay settings (only Normal settings are supported at this time)");
+                        return
+                    };
+                    norm.location = Some(proto::GeographicLocationConstraint { country, city, hostname }.into());
+                    relay_settings.endpoint = Some(proto::relay_settings::Endpoint::Normal(norm));
                     if let Err(e) = client.set_relay_settings(relay_settings).await {
                         eprintln!("Could not set relay location: {}", e.message());
                     }
