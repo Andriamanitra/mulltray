@@ -230,7 +230,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app_state = client.get_tunnel_state(()).await?.into_inner().into();
     let streaming_response = client.events_listen(()).await?;
     let mut stream = streaming_response.into_inner();
-    let locations = client.get_relay_locations(()).await?.into_inner();
+    let mut locations = client.get_relay_locations(()).await?.into_inner();
+    locations.countries.sort_by(|a, b| a.name.cmp(&b.name));
 
     let app = MulltrayApp {
         client,
