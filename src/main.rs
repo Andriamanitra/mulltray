@@ -1,9 +1,12 @@
 use ksni::MenuItem;
+use ksni::TrayMethods;
 use tokio::net::UnixStream;
 use tonic::transport::Channel;
 use tower::service_fn;
 
 use crate::proto::management_service_client::ManagementServiceClient;
+use crate::proto::relay::relay_data::Data;
+use crate::proto::relay::RelayData;
 
 pub mod proto {
     tonic::include_proto!("mullvad_daemon.management_interface");
@@ -25,10 +28,10 @@ impl From<proto::TunnelState> for AppState {
         match value.state {
             None => AppState::Inactive,
             Some(state) => match state {
-                State::Connecting(proto::tunnel_state::Connecting { relay_info }) => {
+                State::Connecting(proto::tunnel_state::Connecting { relay_info, .. }) => {
                     AppState::Connecting(relay_info.unwrap_or_default())
                 }
-                State::Connected(proto::tunnel_state::Connected { relay_info }) => {
+                State::Connected(proto::tunnel_state::Connected { relay_info, .. }) => {
                     AppState::Connected(relay_info.unwrap_or_default())
                 }
                 State::Disconnecting(_) => AppState::Disconnecting,
@@ -93,6 +96,10 @@ impl MulltrayApp {
 }
 
 impl ksni::Tray for MulltrayApp {
+    fn id(&self) -> String {
+        "mulltray".to_string()
+    }
+
     fn activate(&mut self, _x: i32, _y: i32) {
         eprintln!("{:?}", self.app_state);
     }
@@ -174,7 +181,7 @@ impl ksni::Tray for MulltrayApp {
             let mut submenu: Vec<MenuItem<Self>> = vec![];
             for city in &country.cities {
                 for relay in &city.relays {
-                    if relay.endpoint_type == proto::relay::RelayType::Wireguard.into() {
+                    if relay.endpoint_data.as_ref().is_some_and(|data| matches!(data, RelayData {data: Some(Data::Wireguard(_))})) {
                         let country_code = country.code.clone();
                         let city_code = city.code.clone();
                         let hostname = relay.hostname.clone();
@@ -239,16 +246,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         app_state,
         tokio_handle,
     };
-    let tray = ksni::TrayService::new(app);
-    let tray_handle = tray.handle();
-    tray.spawn();
+    let tray_handle = app.spawn().await?;
 
     while let Some(proto::DaemonEvent { event: Some(event) }) = stream.message().await? {
         use proto::daemon_event::Event::*;
         match event {
             TunnelState(tunnel_state) => {
                 tray_handle
-                    .update(|tray: &mut MulltrayApp| tray.app_state = AppState::from(tunnel_state));
+                    .update(|tray: &mut MulltrayApp| tray.app_state = AppState::from(tunnel_state))
+                    .await;
             }
             Settings(_) => {}
             RelayList(_) => {}
