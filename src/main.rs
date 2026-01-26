@@ -140,7 +140,7 @@ impl ksni::Tray for MulltrayApp {
     }
     fn icon_name(&self) -> String {
         match self.app_state {
-            AppState::Inactive => String::from("network-vpn-offline-symbolic"),
+            AppState::Inactive => String::from("network-vpn-disconnected-symbolic"),
             AppState::Error(_) => String::from("network-vpn-error-symbolic"),
             AppState::Connecting(_) => String::from("network-vpn-acquiring-symbolic"),
             AppState::Disconnecting => String::from("network-vpn-acquiring-symbolic"),
