@@ -5,6 +5,33 @@ Mulltray gives a tray icon to [mullvad-daemon](https://github.com/mullvad/mullva
 Linux only.
 Use at your own risk.
 
+## Installation & usage
+
+### Requirements:
+
+* Git
+* Rust toolchain
+* Compatible version of `mullvad-daemon` should be running for `mulltray` to communicate with
+  - You can install `mullvad-daemon` from eg. [mullvadvpn-app](https://github.com/mullvad/mullvadvpn-app), your distro's package repositories, or [nixpkgs#mullvad](https://search.nixos.org/packages?query=mullvad&show=mullvad)
+  - Not all versions are compatible – see [tags](https://github.com/Andriamanitra/mulltray/tags) for versions that are known to work
+
+### Instructions:
+
+```bash
+# Clone the repository
+git clone https://github.com/Andriamanitra/mulltray
+cd mulltray
+
+# Switch to the tag corresponding to your mullvad-daemon version
+git switch --detach $(mullvad-daemon --version | cut -d' ' -f2)
+
+# Build & install the binary to $CARGO_HOME/bin
+cargo install --path .
+
+# Run (you may want to set this up to run automatically on startup)
+mulltray
+```
+
 ## Why?
 
 I like tray icons.
