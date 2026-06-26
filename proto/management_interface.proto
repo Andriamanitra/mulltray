@@ -10,7 +10,7 @@ import "google/protobuf/duration.proto";
 service ManagementService {
   // Control and get tunnel state
   rpc ConnectTunnel(google.protobuf.Empty) returns (google.protobuf.BoolValue) {}
-  rpc DisconnectTunnel(google.protobuf.Empty) returns (google.protobuf.BoolValue) {}
+  rpc DisconnectTunnel(google.protobuf.StringValue) returns (google.protobuf.BoolValue) {}
   rpc ReconnectTunnel(google.protobuf.Empty) returns (google.protobuf.BoolValue) {}
   rpc GetTunnelState(google.protobuf.Empty) returns (TunnelState) {}
 
@@ -34,7 +34,6 @@ service ManagementService {
   rpc UpdateRelayLocations(google.protobuf.Empty) returns (google.protobuf.Empty) {}
   rpc GetRelayLocations(google.protobuf.Empty) returns (RelayList) {}
   rpc SetRelaySettings(RelaySettings) returns (google.protobuf.Empty) {}
-  rpc SetBridgeSettings(BridgeSettings) returns (google.protobuf.Empty) {}
   rpc SetObfuscationSettings(ObfuscationSettings) returns (google.protobuf.Empty) {}
 
   // Settings
@@ -59,12 +58,14 @@ service ManagementService {
   // Account management
   rpc CreateNewAccount(google.protobuf.Empty) returns (google.protobuf.StringValue) {}
   rpc LoginAccount(google.protobuf.StringValue) returns (google.protobuf.Empty) {}
-  rpc LogoutAccount(google.protobuf.Empty) returns (google.protobuf.Empty) {}
+  rpc LogoutAccount(google.protobuf.StringValue) returns (google.protobuf.Empty) {}
   rpc GetAccountData(google.protobuf.StringValue) returns (AccountData) {}
   rpc GetAccountHistory(google.protobuf.Empty) returns (AccountHistory) {}
   rpc ClearAccountHistory(google.protobuf.Empty) returns (google.protobuf.Empty) {}
   rpc GetWwwAuthToken(google.protobuf.Empty) returns (google.protobuf.StringValue) {}
   rpc SubmitVoucher(google.protobuf.StringValue) returns (VoucherSubmission) {}
+  // Android only
+  rpc DeleteAccount(google.protobuf.Empty) returns (google.protobuf.Empty) {}
 
   // Device management
   rpc GetDevice(google.protobuf.Empty) returns (DeviceState) {}
@@ -94,12 +95,17 @@ service ManagementService {
   rpc TestCustomApiAccessMethod(CustomProxy) returns (google.protobuf.BoolValue) {}
   rpc TestApiAccessMethodById(UUID) returns (google.protobuf.BoolValue) {}
 
+  // Bridges (Used for reaching the API)
+  rpc GetBridges(google.protobuf.Empty) returns (BridgeList) {}
+
   // Split tunneling (Linux)
-  rpc SplitTunnelIsEnabled(google.protobuf.Empty) returns (google.protobuf.BoolValue) {}
   rpc GetSplitTunnelProcesses(google.protobuf.Empty) returns (stream google.protobuf.Int32Value) {}
   rpc AddSplitTunnelProcess(google.protobuf.Int32Value) returns (google.protobuf.Empty) {}
   rpc RemoveSplitTunnelProcess(google.protobuf.Int32Value) returns (google.protobuf.Empty) {}
   rpc ClearSplitTunnelProcesses(google.protobuf.Empty) returns (google.protobuf.Empty) {}
+
+  // Split tunneling (Linux, Windows)
+  rpc SplitTunnelIsSupported(google.protobuf.Empty) returns (google.protobuf.BoolValue) {}
 
   // Split tunneling (Windows, macOS, Android)
   rpc AddSplitTunnelApp(google.protobuf.StringValue) returns (google.protobuf.Empty) {}
@@ -143,6 +149,9 @@ service ManagementService {
   rpc AppUpgradeAbort(google.protobuf.Empty) returns (google.protobuf.Empty) {}
   rpc AppUpgradeEventsListen(google.protobuf.Empty) returns (stream AppUpgradeEvent) {}
   rpc GetAppUpgradeCacheDir(google.protobuf.Empty) returns (google.protobuf.StringValue) {}
+
+  rpc SetLogFilter(LogFilter) returns (google.protobuf.Empty) {}
+  rpc LogListen(google.protobuf.Empty) returns (stream LogMessage) {}
 }
 
 message AppUpgradeEvent {
@@ -215,6 +224,8 @@ message ErrorState {
     OTHER_LEGACY_ALWAYS_ON_VPN = 10;
     // Android only
     INVALID_DNS_SERVERS = 11;
+    // Android only
+    INVALID_IPV6_CONFIG = 14;
     SPLIT_TUNNEL_ERROR = 12;
     NEED_FULL_DISK_PERMISSIONS = 13;
   }
@@ -252,6 +263,12 @@ message ErrorState {
 
   message InvalidDnsServersError { repeated string ip_addrs = 1; }
 
+  message InvalidIpv6Config {
+    repeated string addrs = 1;
+    repeated string routes = 2;
+    repeated string dns = 3;
+  }
+
   Cause cause = 1;
   FirewallPolicyError blocking_error = 2;
 
@@ -268,6 +285,8 @@ message ErrorState {
   OtherAlwaysOnAppError other_always_on_app_error = 8;
   // Android only
   InvalidDnsServersError invalid_dns_servers_error = 9;
+  // Android only
+  InvalidIpv6Config invalid_ipv6_config_error = 10;
 }
 
 message TunnelState {
@@ -304,11 +323,10 @@ message TunnelEndpoint {
   string address = 1;
   TransportProtocol protocol = 2;
   bool quantum_resistant = 3;
-  ProxyEndpoint proxy = 4;
-  ObfuscationInfo obfuscation = 5;
-  Endpoint entry_endpoint = 6;
-  TunnelMetadata tunnel_metadata = 7;
-  bool daita = 8;
+  ObfuscationInfo obfuscation = 4;
+  Endpoint entry_endpoint = 5;
+  TunnelMetadata tunnel_metadata = 6;
+  bool daita = 7;
 }
 
 message FeatureIndicators { repeated FeatureIndicator active_features = 1; }
@@ -318,7 +336,7 @@ enum FeatureIndicator {
   MULTIHOP = 1;
   SPLIT_TUNNELING = 2;
   LOCKDOWN_MODE = 3;
-  PORT = 4;
+  WIREGUARD_PORT = 4;
   UDP_2_TCP = 5;
   SHADOWSOCKS = 6;
   QUIC = 7;
@@ -362,17 +380,6 @@ message Endpoint {
   TransportProtocol protocol = 2;
 }
 
-message ProxyEndpoint {
-  enum ProxyType {
-    SHADOWSOCKS = 0;
-    CUSTOM = 1;
-  }
-
-  string address = 1;
-  TransportProtocol protocol = 2;
-  ProxyType proxy_type = 3;
-}
-
 message GeoIpLocation {
   optional string ipv4 = 1;
   optional string ipv6 = 2;
@@ -382,7 +389,6 @@ message GeoIpLocation {
   double longitude = 6;
   bool mullvad_exit_ip = 7;
   optional string hostname = 8;
-  optional string bridge_hostname = 9;
   optional string entry_hostname = 10;
   optional string obfuscator_hostname = 11;
 }
@@ -395,23 +401,8 @@ enum Ownership {
   RENTED = 2;
 }
 
-message BridgeSettings {
-  enum BridgeType {
-    NORMAL = 0;
-    CUSTOM = 1;
-  }
-  message BridgeConstraints {
-    LocationConstraint location = 1;
-    repeated string providers = 2;
-    Ownership ownership = 3;
-  }
-
-  BridgeType bridge_type = 1;
-  BridgeConstraints normal = 2;
-  CustomProxy custom = 3;
-}
-
 message LocationConstraint {
+  // When a LocationConstraint is constructed, the inner `type` value MUST NOT be null.
   oneof type {
     string custom_list = 1;
     GeographicLocationConstraint location = 2;
@@ -424,24 +415,24 @@ message GeographicLocationConstraint {
   optional string hostname = 3;
 }
 
-message Udp2TcpObfuscationSettings { optional uint32 port = 1; }
-
-message ShadowsocksSettings { optional uint32 port = 1; }
-
 // TODO: Rename to "CensorshipCircumventionSettings"?
 message ObfuscationSettings {
   enum SelectedObfuscation {
     AUTO = 0;
     OFF = 1;
-    PORT = 2;
+    WIREGUARD_PORT = 2;
     UDP2TCP = 3;
     SHADOWSOCKS = 4;
     QUIC = 5;
     LWO = 6;
   }
+  message Udp2TcpObfuscation { optional uint32 port = 1; }
+  message Shadowsocks { optional uint32 port = 1; }
+  message WireguardPort { optional uint32 port = 1; }
   SelectedObfuscation selected_obfuscation = 1;
-  Udp2TcpObfuscationSettings udp2tcp = 2;
-  ShadowsocksSettings shadowsocks = 3;
+  Udp2TcpObfuscation udp2tcp = 2;
+  Shadowsocks shadowsocks = 3;
+  WireguardPort wireguard_port = 4;
 }
 
 message CustomList {
@@ -521,8 +512,6 @@ message ApiAccessMethodSettings {
 
 message Settings {
   RelaySettings relay_settings = 1;
-  // TODO: remove
-  BridgeSettings bridge_settings = 2;
   bool allow_lan = 3;
   bool lockdown_mode = 4;
   bool auto_connect = 5;
@@ -587,7 +576,6 @@ enum IpVersion {
 }
 
 message WireguardConstraints {
-  optional uint32 port = 1; // value of SelectedObfuscation::PORT
   optional IpVersion ip_version = 2;
   repeated string allowed_ips = 3;
   bool use_multihop = 4;
@@ -702,26 +690,17 @@ message RelayListCity {
 }
 
 message Relay {
-  message RelayData {
-    message Bridge {}
-    message Wireguard {
-      message Quic {
-        string domain = 1;
-        string token = 2;
-        repeated string addr_in = 3;
-      }
-
-      bytes public_key = 1;
-      bool daita = 2;
-      Quic quic = 3;
-      repeated string shadowsocks_extra_addr_in = 4;
-      bool lwo = 5;
+  message WireguardEndpoint {
+    message Quic {
+      string domain = 1;
+      string token = 2;
+      repeated string addr_in = 3;
     }
-
-    oneof data {
-      Wireguard wireguard = 1;
-      Bridge bridge = 2;
-    }
+    bytes public_key = 1;
+    bool daita = 2;
+    Quic quic = 3;
+    repeated string shadowsocks_extra_addr_in = 4;
+    bool lwo = 5;
   }
 
   string hostname = 1;
@@ -732,7 +711,7 @@ message Relay {
   bool owned = 6;
   string provider = 7;
   fixed64 weight = 8;
-  RelayData endpoint_data = 9;
+  WireguardEndpoint endpoint_data = 9;
   Location location = 10;
 }
 
@@ -759,15 +738,32 @@ message DaemonEvent {
     DeviceEvent device = 5;
     RemoveDeviceEvent remove_device = 6;
     AccessMethodSetting new_access_method = 7;
+    LeakInfo leak_info = 8;
   }
 }
 
+// List of VPN relays
 message RelayList {
   repeated RelayListCountry countries = 1;
-  BridgeEndpointData bridge = 2;
-  WireguardEndpointData wireguard = 3;
+  WireguardEndpointData endpoint_data = 2;
 }
 
+// List of bridge servers
+message BridgeList {
+  repeated Bridge bridges = 1;
+  BridgeEndpointData endpoint_data = 2;
+}
+
+message Bridge {
+  string hostname = 1;
+  string ipv4_addr_in = 2;
+  optional string ipv6_addr_in = 3;
+  bool active = 4;
+  fixed64 weight = 5;
+  Location location = 6;
+}
+
+// Shadowsocks endpoints reachable on all bridge servers
 message BridgeEndpointData { repeated ShadowsocksEndpointData shadowsocks = 1; }
 
 message ShadowsocksEndpointData {
@@ -777,6 +773,7 @@ message ShadowsocksEndpointData {
   TransportProtocol protocol = 4;
 }
 
+// Endpoints reachable on all WireGuard servers
 message WireguardEndpointData {
   repeated PortRange port_ranges = 1;
   string ipv4_gateway = 2;
@@ -837,6 +834,18 @@ message RemoveDeviceEvent {
   repeated Device new_device_list = 2;
 }
 
+/// Details about a potential leak that was detected in the connected state.
+message LeakInfo {
+  /// IPs that were reachable outside of the tunnel.
+  ///
+  /// Format: A list of IPv4 and IPv6 addresses. Possibly intermingled.
+  repeated string ip_addrs = 1;
+  /// The interface which was able to reach the IPs `ip_addrs`.
+  ///
+  /// Format: The name of the leaky interface.
+  string interface = 2;
+}
+
 message PlayPurchase {
   string product_id = 1;
   PlayPurchasePaymentToken purchase_token = 2;
@@ -845,3 +854,7 @@ message PlayPurchase {
 message PlayPurchasePaymentToken { string token = 1; }
 
 message AllowedIpsList { repeated string values = 1; }
+
+message LogFilter { string log_filter = 1; }
+
+message LogMessage { string message = 1; }

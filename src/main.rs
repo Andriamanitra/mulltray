@@ -5,11 +5,17 @@ use tonic::transport::Channel;
 use tower::service_fn;
 
 use crate::proto::management_service_client::ManagementServiceClient;
-use crate::proto::relay::relay_data::Data;
-use crate::proto::relay::RelayData;
 
 pub mod proto {
-    tonic::include_proto!("mullvad_daemon.management_interface");
+    pub mod management_interface {
+        tonic::include_proto!("mullvad_daemon.management_interface");
+    }
+
+    pub use management_interface::*;
+
+    pub mod relay_selector {
+        tonic::include_proto!("mullvad_daemon.relay_selector");
+    }
 }
 
 #[derive(Debug)]
@@ -45,7 +51,9 @@ impl From<proto::TunnelState> for AppState {
 impl From<proto::GeographicLocationConstraint> for proto::LocationConstraint {
     fn from(geo_loc_constraint: proto::GeographicLocationConstraint) -> Self {
         Self {
-            r#type: Some(proto::location_constraint::Type::Location(geo_loc_constraint)),
+            r#type: Some(proto::location_constraint::Type::Location(
+                geo_loc_constraint,
+            )),
         }
     }
 }
@@ -69,7 +77,7 @@ impl MulltrayApp {
     fn disconnect(&self) {
         let mut client = self.client.clone();
         self.tokio_handle.spawn(async move {
-            let _ = client.disconnect_tunnel(()).await;
+            let _ = client.disconnect_tunnel(String::from("mulltray")).await;
         });
     }
 
@@ -181,7 +189,7 @@ impl ksni::Tray for MulltrayApp {
             let mut submenu: Vec<MenuItem<Self>> = vec![];
             for city in &country.cities {
                 for relay in &city.relays {
-                    if relay.endpoint_data.as_ref().is_some_and(|data| matches!(data, RelayData {data: Some(Data::Wireguard(_))})) {
+                    if relay.endpoint_data.is_some() {
                         let country_code = country.code.clone();
                         let city_code = city.code.clone();
                         let hostname = relay.hostname.clone();
@@ -262,6 +270,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Device(_) => {}
             RemoveDevice(_) => {}
             NewAccessMethod(_) => {}
+            LeakInfo(_) => {}
         }
     }
     Ok(())
