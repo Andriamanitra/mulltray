@@ -1,6 +1,11 @@
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    tonic_build::configure()
-        .build_server(false)
-        .compile(&["proto/management_interface.proto"], &["proto"])?;
+    tonic_build::configure().build_server(false).compile(
+        &[
+            "proto/management_interface.proto",
+            "proto/relay_selector.proto",
+        ],
+        &["proto"],
+    )?;
+
     Ok(())
 }
